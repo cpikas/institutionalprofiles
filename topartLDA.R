@@ -1,6 +1,10 @@
+# Does Latent Dirichlet Allocation (LDA) to discover topics across articles in the set
+# Christina K. Pikas @cpikas
+
 # go through a list of files saved in regular WoS format in a directory
+#easier would be to just start with tab del straight from WoS
+
 # pull out the ti, ab, accession, year
-# may concat ti, ab, de for LDA, year if choose to look at change over time
 
 #use  text files with  this format:
 #header
@@ -9,7 +13,11 @@
 # UT WOS:000347606200010
 # ER
 
+
+#set working directory
 setwd("~/apltopart15")
+
+#load up the libraries we'll need
 library("bibliometrix", lib.loc="~/R/win-library/3.4")
 library("plyr", lib.loc="~/R/win-library/3.4")
 library("dplyr", lib.loc="~/R/win-library/3.4")
@@ -19,9 +27,11 @@ library("Rmpfr", lib.loc="~/R/win-library/3.4")
 
 
 
-#get a chr vector that lists all the export files
+#get a chr vector that lists all the export files that are in the data subdirectory
 filenames <- list.files("80-2015recs", full.names=TRUE)
 
+
+#incorporates bibliometrix method
 getWoSdf<-function(filename){
   holdrecs<-readLines(filename)
   recsdf<-isi2df(holdrecs)
@@ -35,24 +45,28 @@ write.csv(WoSall, file="apltopart80-15.csv")
 
 ###LDA
 
-#first check to see if enough have abstracts so I can use that:
+#first check to see if enough have abstracts so I can use that field:
 sum(is.na(WoSall$AB))
-#about 25% don't 1716
+#about 25%  1716
 sum(is.na(WoSall$TI))
 #all have titles 0
 sum(is.na(WoSall$ID))
-#yeah, not so good covereage here - 1/3 missing 2411
+#yeah, not so good coverage here - 1/3 missing 2411
 sum(is.na(WoSall$DE))
 #more than half missing 4675
 
-#can't do with just the titles, so only using records with abstract. earlies with ab is 1977, latest w/out 2014
+hist(WoSall$PY)
+
+#can't do with just the titles, so only using records with abstract. earliest with ab is 1977, latest w/out 2014
 #mean py with abs 2014, mean py overall 1999, mean py w/out 1985
-WoSall$fused<-paste(WoSall$TI,WoSall$AB, WoSall$ID, WoSall$DE)
 
+WoS4lda<-subset(WoSall,is.na(AB)==FALSE,select = c(UT,PY,AB))
 
-WoS4lda<-data.frame(UT=as.character(WoSall$UT[!is.na(WoSall$AB)]),PY=WoSall$PY[!is.na(WoSall$AB)],text=WoSall$fused[!is.na(WoSall$AB)])
+WoS4lda<-subset(WoS4lda,PY>1979)
 
-corp<-Corpus(VectorSource(WoS4lda$text))
+#n=4948
+
+corp<-Corpus(VectorSource(WoS4lda$AB))
 
 #start preprocessing
 #Transform to lower case
@@ -137,8 +151,8 @@ best <- TRUE
 
 ################
 
-#determine the best number of topics
-#omit sample as this set is not terribly big
+# Determine the best number of topics
+# omit sample step if this set is not terribly big
 # if full dataset is too big, repeat over random samples
 # instructions here: http://stackoverflow.com/questions/8273313/random-rows-in-dataframe-in-r
 
@@ -155,55 +169,42 @@ harmonicMean <- function(logLikelihoods, precision=2000L) {
                                        prec = precision) + llMed))))
 }
 
-# # The log-likelihood values are then determined by first fitting the model using for example
-# k = 20
-# burnin = 1000
-# iter = 1000
-# keep = 50
-# 
-# fitted <- LDA(AssociatedPress[21:30,], k = k, method = "Gibbs",control = list(burnin = burnin, iter = iter, keep = keep) )
-# 
-# # where keep indicates that every keep iteration the log-likelihood is evaluated and stored. This returns all log-likelihood values including burnin, i.e., these need to be omitted before calculating the harmonic mean:
-# 
-# logLiks <- fitted@logLiks[-c(1:(burnin/keep))]
-
-# assuming that burnin is a multiple of keep and
-
-# harmonicMean(logLiks)
 
 # generate numerous topic models with different numbers of topics
 keep<-20
-# sequ is number of topics
+
+# sequ is number of topics start, end, number of topics and skip by
 sequ <- seq(85,100,5) 
 
-#not using sample, because not too big, so dtm.s becomes dtm
+# ifnot using sample, because not too big, dtm.s becomes dtm
 fitted_many <- lapply(sequ, function(k) LDA(dtm, k = k, method = "Gibbs",control = list(burnin = burnin, iter = iter, keep = keep) ))
 
 # extract logliks from each topic
 logLiks_many <- lapply(fitted_many, function(L)  L@logLiks[-c(1:(burnin/keep))])
 
-#library("Rmpfr", lib.loc="~/R/win-library/3.3")
-
 
 # compute harmonic means
 hm_many <- sapply(logLiks_many, function(h) harmonicMean(h))
 
-# inspect
+# inspect for the high point, repeat if it's not clear where
 plot(sequ, hm_many, type = "l")
+
+
 
 # compute optimum number of topics
 sequ[which.max(hm_many)]
 
 # k=95 maximizes
 ########
-#Number of topics
+
+#Do the LDA
+#Number of topics found in previous step
 
 k <- 95
 
 #Run LDA using Gibbs sampling
 
 ldaOut <-LDA(dtm,k, method="Gibbs", control=list(nstart=nstart, seed = seed, best=best, burnin = burnin, iter = iter, thin=thin))
-
 
 
 #write out results
@@ -215,7 +216,7 @@ write.csv(ldaOut.topics,file=paste("LDAGibbs",k,"DocsToTopics-WoS80-15.csv"))
 
 
 
-#top 6 terms in each topic
+#top terms in each topic
 
 ldaOut.terms <- as.matrix(terms(ldaOut,10))
 write.csv(ldaOut.terms,file=paste("LDAGibbs",k,"TopicsToTerms.csv"))
@@ -232,12 +233,15 @@ write.csv(topicProbabilities,file=paste("LDAGibbs",k,"TopicProbabilities.csv"))
 
 
 ###################
+# The topics are just a series of words which you then need to name
+# This visualization tool may help
+
 library("LDAvis", lib.loc="~/R/win-library/3.4")
 
 
 #visualize results
 #note - CRAN version does not offer ability to chose whether or not to reorder topics
-# so it does reorder... sigh
+# so it does reorder... and your topic numbers will not be the same as output from previous step
 #' Convert the output of a topicmodels Latent Dirichlet Allocation to JSON
 #' for use with LDAvis
 #'
@@ -251,6 +255,9 @@ library("LDAvis", lib.loc="~/R/win-library/3.4")
 #'
 #' @seealso \link{LDAvis}.
 #' @export
+#' 
+
+# note: the function is changed from the web because inspect() only gives 10 topics selected randomly
 
 topicmodels_json_ldavis <- function(fitted, corpus, doc_term){
   # Required packages
@@ -269,7 +276,7 @@ topicmodels_json_ldavis <- function(fitted, corpus, doc_term){
     temp <- paste(corpus[[i]]$content, collapse = ' ')
     doc_length <- c(doc_length, stri_count(temp, regex = '\\S+'))
   }
-  temp_frequency <- inspect(doc_term)
+  temp_frequency <- as.matrix(doc_term)
   freq_matrix <- data.frame(ST = colnames(temp_frequency),
                             Freq = colSums(temp_frequency))
   rm(temp_frequency)
@@ -283,15 +290,19 @@ topicmodels_json_ldavis <- function(fitted, corpus, doc_term){
   return(json_lda)
 }
 
+
+
 ldaOut.json<-topicmodels_json_ldavis(ldaOut,corp,dtm)
+
+write(ldaOut.json, "ldaOut.json")
+
 
 #puts on screen or in RStudio viewer
 serVis(ldaOut.json)
 
-#note options to put on GitHub gist (does not work at APL?) or particular directory
+#note options to put on GitHub gist or particular directory
 serVis(ldaOut.json, out.dir = "vis",open.browser = TRUE)
 
-write(ldaOut.json, "ldaOut.json")
 
 
 ##########################
